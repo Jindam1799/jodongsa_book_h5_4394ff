@@ -21,34 +21,91 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
 
     <script>
-      // 카카오톡으로 받은 링크 → 외부 브라우저로 자동 전환
-      //  - 안드로이드: 크롬으로 열기 (크롬이 없으면 기본 브라우저)
-      //  - 아이폰: 사파리로 열기 (아이폰 크롬도 사파리 엔진이라 음성이 같음)
+      // 어디서 링크를 열어도 → 크롬으로 열기
+      //  - 안드로이드: 크롬이 아니면(카카오톡·네이버·인스타·문자·삼성인터넷 등) 크롬 앱으로 전환
+      //                크롬이 없으면 플레이스토어 크롬 설치 화면
+      //  - 아이폰: 크롬이 아니면(카카오톡·사파리 등) 크롬 앱으로 전환
+      //  - 앱이 전환을 막으면 화면에 '크롬으로 열기' 안내를 띄움
+      //  - PC는 그대로 / 안내에서 '그냥 여기서 할게요'를 누르면 그 창에서는 다시 묻지 않음
       (function () {
-        var ua = navigator.userAgent.toLowerCase();
-        if (ua.indexOf('kakaotalk') === -1) return;
-        var isAndroid = ua.indexOf('android') > -1;
-        var isIOS = /iphone|ipad|ipod/.test(ua);
-        var cleanUrl = location.href.split('#')[0];
-        var openExternal = function (u) {
-          location.href = 'kakaotalk://web/openExternal?url=' + encodeURIComponent(u);
-        };
+        var ua = navigator.userAgent;
+        if (!/^https?:$/.test(location.protocol)) return;
+        var isAndroid = /android/i.test(ua);
+        var isIOS = /iphone|ipad|ipod/i.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1);
+        if (!isAndroid && !isIOS) return;
+        try {
+          if (sessionStorage.getItem('jindam_stay_here') === '1') return;
+        } catch (e) {}
 
-        if (isAndroid) {
-          // 크롬이 없어서 되돌아온 경우 → 기본 브라우저로
-          if (/[?&]nochrome=1/.test(cleanUrl)) {
-            openExternal(cleanUrl.replace(/[?&]nochrome=1/, ''));
-            return;
-          }
-          var fallback = cleanUrl + (cleanUrl.indexOf('?') > -1 ? '&' : '?') + 'nochrome=1';
-          location.href =
-            'intent://' + cleanUrl.replace(/^https?:\/\//, '') +
-            '#Intent;scheme=' + location.protocol.replace(':', '') +
-            ';package=com.android.chrome;S.browser_fallback_url=' +
-            encodeURIComponent(fallback) + ';end';
-        } else if (isIOS) {
-          openExternal(cleanUrl);
+        var inApp = /KAKAOTALK|NAVER|Instagram|FBAN|FBAV|FB_IAB|Line\/|DaumApps|BAND\/|everytime|; wv\)|\bwv\b/i.test(ua);
+        var isChrome = isIOS
+          ? /CriOS/.test(ua) && !inApp
+          : /Chrome\/\d+/.test(ua) && !inApp &&
+            !/SamsungBrowser|EdgA|OPR\/|OPT\/|Whale|YaBrowser|MiuiBrowser|HuaweiBrowser|HeyTapBrowser|UCBrowser|DuckDuckGo|Version\/[\d.]+ Chrome/i.test(ua);
+        if (isChrome) return;
+
+        var url = location.href.split('#')[0];
+        var noScheme = url.replace(/^https?:\/\//, '');
+        var https = location.protocol === 'https:';
+        var storeUrl = isAndroid
+          ? 'https://play.google.com/store/apps/details?id=com.android.chrome'
+          : 'https://apps.apple.com/app/id535886823';
+        var chromeUrl = isAndroid
+          ? 'intent://' + noScheme + '#Intent;scheme=' + (https ? 'https' : 'http') +
+            ';package=com.android.chrome;S.browser_fallback_url=' + encodeURIComponent(storeUrl) + ';end'
+          : (https ? 'googlechromes://' : 'googlechrome://') + noScheme;
+
+        function openChrome() {
+          location.href = chromeUrl;
         }
+        window.__jindamOpenChrome = openChrome;
+
+        // 전환이 안 됐으면(여전히 이 화면이 보이면) 안내 띄우기
+        function showGuide() {
+          if (document.hidden || document.getElementById('chrome-guide')) return;
+          var box = document.createElement('div');
+          box.id = 'chrome-guide';
+          box.setAttribute('style',
+            'position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;padding:20px;font-family:inherit');
+          box.innerHTML =
+            '<div style="background:#fff;border-radius:20px;padding:24px 20px;max-width:340px;width:100%;text-align:center;box-shadow:0 10px 30px rgba(0,0,0,.25)">' +
+            '<div style="font-size:40px;line-height:1">🌐</div>' +
+            '<h2 style="margin:10px 0 8px;font-size:19px;color:var(--main-dark,#333)">크롬에서 열어 주세요</h2>' +
+            '<p style="margin:0 0 16px;font-size:14px;line-height:1.6;color:#475569">크롬에서 열어야 원어민 음성이 깨끗하게 나오고<br>학습 기록도 잘 저장돼요.</p>' +
+            '<button id="cg-open" style="display:block;width:100%;padding:13px;border:none;border-radius:14px;background:var(--main-color,#f09846);color:#fff;font-size:16px;font-weight:800;margin-bottom:8px">크롬으로 열기</button>' +
+            '<button id="cg-copy" style="display:block;width:100%;padding:11px;border:1.5px solid #cbd5e1;border-radius:14px;background:#fff;color:#334155;font-size:14px;font-weight:700;margin-bottom:8px">🔗 링크 복사하기</button>' +
+            '<a id="cg-store" href="' + storeUrl + '" style="display:block;font-size:13px;color:#64748b;margin:6px 0 10px">크롬이 없나요? 크롬 설치하기</a>' +
+            '<button id="cg-stay" style="background:none;border:none;color:#94a3b8;font-size:13px;text-decoration:underline">그냥 여기서 할게요</button>' +
+            '</div>';
+          (document.body || document.documentElement).appendChild(box);
+          document.getElementById('cg-open').onclick = openChrome;
+          document.getElementById('cg-stay').onclick = function () {
+            try { sessionStorage.setItem('jindam_stay_here', '1'); } catch (e) {}
+            box.remove();
+          };
+          document.getElementById('cg-copy').onclick = function () {
+            var btn = this;
+            var done = function () { btn.textContent = '✅ 복사했어요! 크롬 주소창에 붙여넣어 주세요'; };
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+              navigator.clipboard.writeText(url).then(done, function () { fallbackCopy(); });
+            } else fallbackCopy();
+            function fallbackCopy() {
+              var ta = document.createElement('textarea');
+              ta.value = url;
+              (document.body || document.documentElement).appendChild(ta);
+              ta.select();
+              try { document.execCommand('copy'); done(); } catch (e) {}
+              ta.remove();
+            }
+          };
+        }
+        // 화면이 다 그려진 뒤 전환 (로딩 중에 전환하면 일부 앱에서 빈 화면이 남음)
+        var start = function () {
+          openChrome();
+          setTimeout(showGuide, 1500);
+        };
+        if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start);
+        else start();
       })();
     </script>
   </head>
@@ -105,7 +162,7 @@
               진담중국어에 있습니다. 무단 복제·배포·수정 및 상업적 이용을
               금합니다.
             </p>
-            <p class="update-date">최종 업데이트 : 2026. 11. 09 (v2.3)</p>
+            <p class="update-date">최종 업데이트 : 2026. 11. 18 (v2.4)</p>
           </div>
         </div>
         <div class="popup-actions-row">
@@ -118,15 +175,21 @@
 
       <div id="intro-page-2" class="popup-page hidden">
         <h2>📢 새로워진 기능</h2>
-        <p class="update-badge">2026. 11. 09 업데이트 · v2.3</p>
+        <p class="update-badge">2026. 11. 18 업데이트 · v2.4</p>
         <div class="intro-scroll-content">
-          <h3 class="intro-sub">📅 DAY 골라 풀기 (NEW)</h3>
+          <h3 class="intro-sub">🌐 어디서 열어도 크롬으로 (NEW)</h3>
+          <p>
+            카카오톡·문자·인스타그램 등 어디서 링크를 눌러도 자동으로
+            <strong>크롬</strong>에서 열려요. 크롬이 없으면 설치 화면으로 안내해요.
+          </p>
+
+          <h3 class="intro-sub">📅 DAY 골라 풀기</h3>
           <p>
             로비에서 WEEK를 누르면 <strong>DAY 1~5</strong> 중 골라서 조금씩 풀 수
             있어요. 한 주를 한 번에 풀고 싶으면 📚 WEEK 전체 풀기를 누르세요.
           </p>
 
-          <h3 class="intro-sub">🐾 새 친구 병아리 (NEW)</h3>
+          <h3 class="intro-sub">🐾 새 친구 병아리</h3>
           <p>
             병아리가 옆에서 함께 훈련해요. 맞히면 기뻐하고, 틀리면 같이
             아쉬워해요. 로비에서 병아리를 눌러 보세요!
@@ -170,11 +233,6 @@
           <h3 class="intro-sub">🎙️ 녹음 & 🐢 느리게 듣기</h3>
           <p>정답 화면에서 내 발음을 녹음하고, 원어민 음성 속도를 바꿀 수 있어요.</p>
 
-          <h3 class="intro-sub">💬 카카오톡으로 받은 링크</h3>
-          <p>
-            카카오톡에서 링크를 누르면 자동으로 크롬(아이폰은 사파리)에서
-            열려요. 더 깨끗한 원어민 음성으로 학습할 수 있어요.
-          </p>
 
           <h3 class="intro-sub">📱 안드로이드 기기 이용 안내</h3>
           <p>
@@ -348,7 +406,7 @@
             <button id="btn-toggle-pinyin-lobby" class="chip-btn">병음 ON</button>
             <button id="btn-open-intro" class="chip-btn">ⓘ 게임 소개</button>
           </div>
-          <p class="lobby-footer">ⓒ 2026 진담중국어 · v2.3 (2026.11.09)</p>
+          <p class="lobby-footer">ⓒ 2026 진담중국어 · v2.4 (2026.11.18)</p>
         </div>
       </section>
 
